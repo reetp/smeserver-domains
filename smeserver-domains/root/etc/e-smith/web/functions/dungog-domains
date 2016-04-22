@@ -1,0 +1,620 @@
+#!/usr/bin/perl -wT
+
+#----------------------------------------------------------------------
+# heading     : Administration
+# description : Domain pseudonyms
+# navigation  : 4000 4736
+#
+# Author dungog.net
+#
+#----------------------------------------------------------------------
+
+package esmith;
+
+use strict;
+use CGI ':all';
+use CGI::Carp qw(fatalsToBrowser);
+
+use esmith::cgi;
+use esmith::config;
+use esmith::util;
+use esmith::db;
+
+sub showInitial ($$);                   #main form
+sub performSave ($);
+
+sub modifyOptions ($$);                 #vd authority and options
+sub performModifyOptions ($);
+
+sub modifyEmail ($$);                   #vd email
+sub editEmail ($$);
+sub performModifyEmail ($);
+sub removeEmail ($);
+
+
+BEGIN
+{
+    # Clear PATH and related environment variables so that calls to
+    # external programs do not cause results to be tainted. See
+    # "perlsec" manual page for details.
+
+    $ENV {'PATH'} = '';
+    $ENV {'SHELL'} = '/bin/bash';
+    delete $ENV {'ENV'};
+}
+
+esmith::util::setRealToEffective ();
+
+$CGI::POST_MAX=1024 * 100;  # max 100K posts
+$CGI::DISABLE_UPLOADS = 1;  # no uploads
+
+my %conf;
+tie %conf, 'esmith::config';
+
+my %accounts;
+tie %accounts, 'esmith::config', '/home/e-smith/db/accounts';
+
+my %domains;
+tie %domains, 'esmith::config', '/home/e-smith/db/domains';
+
+my %dungog;
+tie %dungog, 'esmith::config', '/home/e-smith/db/dungog';
+
+#------------------------------------------------------------
+# examine state parameter and display the appropriate form
+#------------------------------------------------------------
+
+my $q = new CGI;
+
+if (! grep (/^state$/, $q->param))
+{
+    showInitial ($q, '');
+}
+elsif ($q->param ('state') eq "save")
+{
+    performSave ($q);
+}
+
+#options
+elsif ($q->param ('state') eq "modifyOptions")
+{
+    modifyOptions ($q, '');
+}
+elsif ($q->param ('state') eq "performModifyOptions")
+{
+    performModifyOptions ($q);
+}
+
+#pseudonyms
+elsif ($q->param ('state') eq "email")
+{
+    modifyEmail ($q, '');
+}
+elsif ($q->param ('state') eq "edit")
+{
+    editEmail ($q, '');
+}
+elsif ($q->param ('state') eq "performEmail")
+{
+    performModifyEmail ($q);
+}
+elsif ($q->param ('state') eq "remove")
+{
+    removeEmail ($q);
+}
+
+else
+{
+    esmith::cgi::genStateError ($q, \%conf);
+}
+
+exit (0);
+
+#########################################################################
+sub showInitial ($$)
+{
+    my ($q, $msg) = @_;
+    my @domains = db_get(\%domains);
+
+    if ($msg eq '')
+    {
+          esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Domain pseudonyms');
+    }
+    else
+    {
+        esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Domain pseudonyms');
+
+        print $q->h4 ('Operation status report');
+        print $q->p ($msg);
+        print $q->hr;
+    }
+
+    print $q->startform (-method => 'POST', -action => $q->url (-absolute => 1));
+
+    print $q->p ('Set pseudonyms for a single domain,<br>
+                  This panel just shows the pseudonyms for a single domain.<br>
+                  see also the <a href="pseudonyms">Pseudonyms</a> panel.');
+
+    my $numDomains = @domains;
+    if ($numDomains == 0)
+    {
+          print $q->p ($q->b ('There are no virtual domains in the system.'));
+    }
+    else
+    {
+       print $q->p ($q->b ("Current List of Domains."));
+
+       print "<table border=1 cellspacing=1 cellpadding=4>";
+
+       print $q->Tr (esmith::cgi::genSmallCell ($q, $q->b ('Domain')),
+                 esmith::cgi::genSmallCell ($q, $q->b ('Description')),
+                 esmith::cgi::genSmallCell ($q, $q->b ('Mail Delivery')),
+                 esmith::cgi::genSmallCell ($q, $q->b ('Delegation')));
+
+       my $domain;
+       foreach $domain (sort @domains)
+       {
+          my $desc = db_get_prop(\%domains, $domain, "Description") || '';
+
+          my $owner = db_get_prop(\%dungog, $domain, "owner") || 'admin';
+          my $group = db_get_prop(\%dungog, $domain, "group") || 'everyone';
+          if ($group eq 'Administrator')
+          {
+             $group = $owner;
+          }
+
+          print $q->Tr (esmith::cgi::genSmallCell ($q, $domain),
+                        esmith::cgi::genSmallCell ($q, $desc),
+                        esmith::cgi::genSmallCell ($q,
+                                            $q->a ({href => $q->url (-absolute => 1)
+                                                        . "?state=email&domain="
+                                                        . $domain}, 'Modify ...')),
+                        esmith::cgi::genSmallCell ($q,
+                                            $q->a ({href => $q->url (-absolute => 1)
+                                                        . "?state=modifyOptions&domain="
+                                                        . $domain}, $owner.'::'.$group)));
+       }
+       print '</table>';
+    }
+
+    print $q->p ($q->b ("Save Settings"));
+
+    print $q->p ("Pseudonym settings are not activated until you save them here");
+
+    print $q->Tr (esmith::cgi::genButtonRow ($q,
+                                           $q->submit (-name => 'action',
+                                                       -value => 'Save')));
+
+    print $q->hidden (-name => 'MailServer', -override => 1, -default => 'skipMS');
+    print $q->hidden (-name => 'state', -override => 1, -default => 'save');
+    print $q->endform;
+    print $q->p ($q->hr, $q->font ({size => "-1"}, "Copyright dungog.net"));
+
+    print '</FONT>';
+    print '</DIV>';
+    print $q->end_html;
+}
+
+
+sub modifyOptions ($$)
+{
+    my ($q, $msg) = @_;
+    my $domain     = $q->param ('domain') || '';
+
+    if ($msg eq '')
+    {
+          esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify Domain pseudonyms - Options.');
+    }
+    else
+    {
+        esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify Domain pseudonyms - Options.');
+
+        print $q->h4 ('Operation status report');
+        print $q->p ($msg);
+        print $q->hr;
+    }
+
+    print $q->startform (-method => 'POST', -action => $q->url (-absolute => 1));
+
+    # find system users
+    my @userlist = ('admin','everyone');
+    push (@userlist, '-- groups --');
+    foreach (sort keys %accounts)
+    {
+       push (@userlist, $_)
+           if (db_get_type(\%accounts, $_) eq 'group');
+    }
+    push (@userlist, '-- users --');
+    foreach (sort keys %accounts)
+    {
+       push (@userlist, $_)
+           if (db_get_type(\%accounts, $_) eq 'user');
+    }
+
+    my @grouplist = ('everyone','Administrator');
+    foreach (keys %accounts)
+    {
+       push (@grouplist, $_)
+           if (db_get_type(\%accounts, $_) eq 'group');
+    }
+
+    print $q->table ({border => 0, cellspacing => 0, cellpadding => 4},
+
+       $q->Tr (esmith::cgi::genCell ($q, "Domain name:"),
+               esmith::cgi::genCell ($q, $domain)),
+
+       esmith::cgi::genTextRow ($q, 'The alternative administrator is used delegate a domain to a user or group.
+                <br>They can then add email addresses with userpanel-domains
+                <br>First delegate them here, then delegate the userpanel with userpanel access.
+                <br>For full access delegate this panel, dungog-domains.'),
+
+       esmith::cgi::genWidgetRow ($q, "Alternative administrator",
+             $q->popup_menu (-name    => "owner",
+                             -values  => [ @userlist ],
+                             -default => db_get_prop(\%dungog, $domain, "owner") || 'admin')),
+
+       esmith::cgi::genTextRow ($q, "Restrict the userlist in the email dropdown box to the Administrator or members of a group. "),
+
+       esmith::cgi::genWidgetRow ($q, "Alternative group",
+                   $q->popup_menu (-name    => "group",
+                                   -values  => [ sort @grouplist ],
+                                   -default => db_get_prop(\%dungog, $domain, "group") || 'everyone')),
+
+       esmith::cgi::genButtonRow ($q,
+                                  $q->submit (-name => 'action',
+                                              -value => 'Modify')));
+
+    print $q->hidden (-name => 'domain', -override => 1, -default => $domain);
+    print $q->hidden (-name => 'state',  -override => 1, -default => 'performModifyOptions');
+
+    print $q->endform;
+    print $q->p ($q->hr, $q->font ({size => "-1"}, "Copyright dungog.net"));
+
+    print '</FONT>';
+    print '</DIV>';
+    print $q->end_html;
+}
+
+#------------------------------------------------------------
+# Modify Domain
+#------------------------------------------------------------
+
+sub performModifyOptions ($)
+{
+    my ($q) = @_;
+
+    my $domain = $q->param ('domain');
+    my $owner  = $q->param ('owner');
+    my $group  = $q->param ('group');
+
+    unless (exists $dungog {$domain})
+    {
+      db_set(\%dungog, $domain, 'domain');
+    }
+    db_set_prop(\%dungog, $domain, 'owner',  $owner);
+    db_set_prop(\%dungog, $domain, 'group',  $group);
+
+    showInitial ($q, "Successfully modified domain <b>$domain</b>.");
+}
+
+#------------------------------------------------------------
+# modify email
+#------------------------------------------------------------
+
+sub modifyEmail ($$)
+{
+    my ($q, $msg) = @_;
+    my $domain = $q->param ('domain');
+
+    if ($msg eq '')
+    {
+          esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify domain Email.');
+    }
+    else
+    {
+        esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify domain Email.');
+
+        print $q->h4 ('Operation status report');
+        print $q->p ($msg);
+        print $q->hr;
+    }
+
+    print $q->startform (-method => 'POST', -action => $q->url (-absolute => 1));
+
+
+    #commom with userpanel
+    print $q->p ($q->b ("Delegate the domain \"$domain\""));
+
+    print $q->Tr (esmith::cgi::genTextRow ($q, 'Forward all email for this domain to a remote mailserver,
+                  either use a FQDN mail.domain.net or an IP address.
+                  Or leave blank and forward domain specific pseudonyms below.<br>
+                  CAUTION. enable your remote server before delegating or you may create a mail loop.'));
+
+    print '<p>';
+    print $q->Tr (esmith::cgi::genNameValueRow ($q,"Server Name or IP",
+                                                     "MailServer",
+                             db_get_prop(\%domains, $domain, "MailServer") || ''));
+
+    # get all pseudonyms
+    my @vdemail = ();
+    foreach (keys %accounts)
+    {
+        push (@vdemail, $_)
+            if (db_get_type(\%accounts, $_) eq 'pseudonym');
+    }
+
+    # find email for this domain
+    my @vdemail2 = ();
+    foreach (@vdemail)
+    {
+        (my $u, my $d) = split (/@/, $_);
+
+        push (@vdemail2, $u)  if ($d eq $domain);
+    }
+
+    #are there any ?
+    my $vdemail = @vdemail2;
+    if ($vdemail == 0)
+    {
+        print $q->p ($q->b ("There are no pseudonyms for the domain \"$domain\""));
+
+        print $q->p ($q->a ({href => $q->url (-absolute => 1) . "?state=edit&domain=$domain&pseu=new2user"},
+                      'Click here'),
+                      'to add your first pseudonym.');
+    }
+    else
+    {
+        print $q->p ($q->b ("Current List of pseudonyms for the domain \"$domain\""));
+
+        print $q->p ($q->a ({href => $q->url (-absolute => 1) . "?state=edit&domain=$domain&pseu=new2user"},
+                      'Click here'),
+                      "to add another pseudonym.");
+
+        print "<table border=1 cellspacing=1 cellpadding=4>";
+
+        print $q->Tr (esmith::cgi::genSmallCell ($q, $q->b ('Pseudonyms')),
+                      esmith::cgi::genSmallCell ($q, $q->b ('Local user')),
+                      $q->td ('&nbsp;'),
+                      $q->td ('&nbsp;'));
+
+        foreach my $pseu (sort @vdemail2)
+        {
+            my $acct  = db_get_prop(\%accounts, "$pseu\@$domain", "Account") || '';
+
+            print $q->Tr (esmith::cgi::genSmallCell ($q, $pseu),
+                          esmith::cgi::genSmallCell ($q, $acct),
+                          esmith::cgi::genSmallCell ($q,
+                                  $q->a ({href => $q->url (-absolute => 1)
+                                  . "?state=edit&domain=$domain&acct=$acct&pseu=$pseu"}, 'Modify...')),
+                          esmith::cgi::genSmallCell ($q,
+                                  $q->a ({href => $q->url (-absolute => 1)
+                                  . "?state=remove&domain=$domain&pseu=$pseu"}, 'Remove...')));
+        }
+
+        print '</table>';
+
+}
+
+    print $q->p ($q->b ("Save Settings"));
+
+    print $q->p ("Pseudonym settings are not activated until you save them here");
+
+    print $q->Tr (esmith::cgi::genButtonRow ($q,
+                                           $q->submit (-name => 'action',
+                                                       -value => 'Save')));
+
+    print $q->hidden (-name => 'state', -override => 1, -default => 'save');
+    print $q->hidden (-name => 'domain', -override => 1, -default => $domain);
+
+    print $q->endform;
+    print $q->p ($q->hr, $q->font ({size => "-1"}, "Copyright dungog.net"));
+
+    print '</FONT>';
+    print '</DIV>';
+    print $q->end_html;
+}
+
+#------------------------------------------------------------
+# Edit Email address
+#------------------------------------------------------------
+
+sub editEmail ($$)
+{
+    my ($q, $msg) = @_;
+    my $domain  = $q->param ('domain');
+    my $acct    = $q->param ('acct') || '';
+    my $pseu    = $q->param ('pseu') || '';
+    my $user1   = $q->param ('pseu');
+    my $newuser = '';
+    
+    if ($pseu eq 'new2user')
+    {
+      $newuser = 'new';
+      $pseu    = '';
+    }
+
+    # find system users in group
+    #my $owner  =    $ENV{'REMOTE_USER'};    #userpanel
+    my $owner = db_get_prop(\%dungog, $domain, "owner") || '';
+    my $group = db_get_prop(\%dungog, $domain, "group") || 'everyone';
+    my @selected ;
+    my $userlist = db_get_prop(\%accounts, $group, 'Members') || '';
+
+    if ($group eq 'everyone')
+    {
+      foreach (keys %accounts)
+      {
+         push (@selected, $_)
+             if (db_get_type(\%accounts, $_) eq 'user');
+      }
+    }
+    elsif ($group eq 'Administrator')
+    {
+      @selected = ($owner);
+    }
+    else
+    {
+      @selected = split (/,/, $userlist);
+    }
+
+    if ($msg eq '')
+    {
+          esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify Email Address.');
+    }
+    else
+    {
+        esmith::cgi::genHeaderNonCacheable
+            ($q, \%conf, 'Modify Email Address.');
+
+        print $q->h4 ('Operation status report');
+        print $q->p ($msg);
+        print $q->hr;
+    }
+
+    my @sorted = sort @selected;
+
+    print $q->startform (-method => 'POST', -action => $q->url (-absolute => 1));
+
+    print $q->table ({border => 0, cellspacing => 0, cellpadding => 4},
+
+          $q->Tr (esmith::cgi::genCell ($q, "Domain name:"),
+                               esmith::cgi::genCell ($q, $domain)),
+
+           esmith::cgi::genTextRow ($q, "Enter a pseudonym. <br>".
+                                        "NOTE. \@$domain is added for you."),
+
+           esmith::cgi::genNameValueRow ($q, "Pseudonym",
+                                           "pseu",
+                                           $pseu ,),
+
+           esmith::cgi::genWidgetRow ($q, "Local Account",
+                               $q->popup_menu (-name    => "acct",
+                                               -values  => [ '', @sorted ],
+                                               -default => $acct )),
+
+
+           esmith::cgi::genButtonRow ($q,  $q->submit (-name => 'action',
+                                                       -value => 'Save')));
+
+    print $q->hidden (-name => 'domain', -override => 1, -default => $domain);
+    print $q->hidden (-name => 'user1',  -override => 1, -default => $user1);
+    print $q->hidden (-name => 'newuser', -override => 1, -default => $newuser);
+    print $q->hidden (-name => 'state',   -override => 1, -default => 'performEmail');
+
+    print $q->endform;
+    print $q->p ($q->hr, $q->font ({size => "-1"}, "Copyright dungog.net"));
+
+    print '</FONT>';
+    print '</DIV>';
+    print $q->end_html;
+}
+
+
+sub performModifyEmail ($)
+{
+    my ($q) = @_;
+
+    my $domain   = $q->param ('domain');
+    my $acct     = $q->param ('acct');
+    my $pseu     = $q->param ('pseu');
+    my $Pseudonym = "$pseu\@$domain";
+    my $user1    = $q->param ('user1');
+    my $newuser  = $q->param ('newuser');
+
+    # get all pseudonyms
+    my @vdemail = ();
+    foreach (keys %accounts)
+    {
+        push (@vdemail, $_)
+            if (db_get_type(\%accounts, $_) eq 'pseudonym');
+    }
+    
+    #don't overwite existing users
+    if ($newuser eq 'new2user')
+    {
+      foreach (@vdemail)
+      {
+          if ($_ eq $Pseudonym)
+          {
+               editEmail ($q, "Error: Pseudonym already exists.");
+               return;
+          } 
+       }    
+    }
+
+    if ($pseu =~ /^([a-zA-Z0-9][\-\_\.a-zA-Z0-9]*)$/)
+    {
+        $pseu = $1;
+    }
+    else
+    {
+        editEmail ($q, "Error: unexpected characters in Pseudonym, \"$pseu\".");
+        return;
+    }
+
+    if ($acct eq '')
+    {
+        editEmail ($q, "Error: please select a local account.");
+        return;
+    }
+
+    unless (exists $accounts {$Pseudonym})
+    {
+      db_set(\%accounts, $Pseudonym, 'pseudonym');
+    }
+    db_set_prop(\%accounts, $Pseudonym, 'Account', $acct);
+
+    #we changed the Pseudonym, so delete the old
+    if ($user1 ne $pseu)
+    {
+	   db_delete(\%accounts, "$user1\@$domain");
+    }
+
+    showInitial ($q, "Successfully modified Pseudonym.\n");
+    #showInitial ($q, "Successfully modified Pseudonym for $domain." ,"$domain");
+}
+
+sub removeEmail ($)
+{
+    my ($q)  = @_;
+    my $pseu = $q->param ('pseu');
+    my $domain   = $q->param ('domain');
+    my $Pseudonym = "$pseu\@$domain";
+
+    db_delete(\%accounts,  $Pseudonym);
+
+    showInitial ($q, "Successfully removed Pseudonym.");
+    #showInitial ($q, "Successfully removed Pseudonym for $domain." ,"$domain");
+}
+
+sub performSave ($)
+{
+    my ($q)  = @_;
+    my $domain   = $q->param ('domain');
+    my $MailServer  = $q->param ('MailServer') || '';
+
+    unless  ($MailServer eq 'skipMS')
+    {
+     if ($MailServer eq '')
+     {
+        db_delete_prop(\%domains, $domain, 'MailServer');
+     }
+     else
+     {
+        db_set_prop(\%domains, $domain, 'MailServer', $MailServer);
+     }
+    }
+
+    system ("/sbin/e-smith/signal-event", "email-update") == 0
+            or die ("Error occurred while restarting email.\n");
+
+    showInitial ($q, "Settings saved and email restarted.");
+    #showInitial ($q, "Settings saved and email restarted." ,"$domain");
+}
