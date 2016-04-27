@@ -3,5 +3,5 @@
 use esmith::Build::CreateLinks qw(:all);
 
 my $event;
-panel_link("Domain Management", 'manager');
-panel_link("Domain Management User", 'user');
+panel_link("DomainManagement", 'manager');
+panel_link("DomainManagementUser", 'user');
