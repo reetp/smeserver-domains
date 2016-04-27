@@ -1,7 +1,7 @@
 %define name smeserver-domains
 %define version 1.3
 %define release 1
-Summary: SMEserver rpm for rsync
+Summary: SMEserver rpm for domain pseudonyms
 Name: %{name}
 Version: %{version}
 Release: %{release}
@@ -21,7 +21,7 @@ AutoReqProv: no
 SMEserver rpm for more advanced domain controls
 
 %changelog
-* Sat Apr 22 2016 John Crisp <jcrisp@safeandsoundit.co.uk>
+* Sat Apr 22 2016 John Crisp <jcrisp@safeandsoundit.co.uk> 0-1.4-1.sme
 - First import to smecontribs
 
 * Tue Oct 31 17:00:00 2006 Stephen Noble <support@dungog.net>
@@ -58,23 +58,9 @@ if [ $1 = 1 ] ; then
  /bin/touch /home/e-smith/db/dungog
 fi
 
-/bin/chmod 644 /etc/crontab
-/etc/e-smith/events/actions/initialize-default-databases
-
-echo ''
-echo 'Remote server syntax changed for secure transfers from dungog-rsync-1.2-4'
-echo 'you now need to enter the user as well as the server'
-echo 'this removes the requirement of having the same user on both servers'
-echo 'but you may need to update your existing rules'
-echo ''
-
 
 %postun
 #uninstalls
-if [ $1 = 0 ] ; then
- /sbin/e-smith/expand-template /etc/crontab
- /bin/rm -rf /usr/bin/dungogrsync-?????
-fi
 
 #&upgrades
 
