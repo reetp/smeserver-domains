@@ -378,10 +378,10 @@ sub modifyEmail ($$)
 
         print "<table border=1 cellspacing=1 cellpadding=4>";
 
-        print $q->Tr (esmith::cgi::genSmallCell ($q, $q->b ('Pseudonyms')),
-                      esmith::cgi::genSmallCell ($q, $q->b ('Local user')),
-                      $q->td ('&nbsp;'),
-                      $q->td ('&nbsp;'));
+        print $q->Tr (esmith::cgi::genSmallCell ($q, $q->b ('Pseudonyms'), 'header'),
+                      esmith::cgi::genSmallCell ($q, $q->b ('Local user'), 'header'),
+                      esmith::cgi::genSmallCell ($q, $q->b ('&nbsp'), 'header'),
+                      esmith::cgi::genSmallCell ($q, $q->b ('&nbsp'), 'header'));
 
         foreach my $pseu (sort @vdemail2)
         {
