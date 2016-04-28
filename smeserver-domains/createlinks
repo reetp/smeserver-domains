@@ -2,6 +2,8 @@
 
 use esmith::Build::CreateLinks qw(:all);
 
-my $event;
-panel_link("DomainManagement", 'manager');
-panel_link("DomainManagementUser", 'user');
+# my $event;
+
+panel_link("dungog-domains", 'manager');
+
+# safe_symlink("../../../functions/dungog-domains", "root/etc/e-smith/web/panels/manager/cgi-bin/dungog-domains");

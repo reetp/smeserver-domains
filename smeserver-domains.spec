@@ -1,5 +1,5 @@
 %define name smeserver-domains
-%define version 1.3
+%define version 1.4
 %define release 1
 Summary: SMEserver rpm for domain pseudonyms
 Name: %{name}
@@ -21,14 +21,14 @@ AutoReqProv: no
 SMEserver rpm for more advanced domain controls
 
 %changelog
-* Sat Apr 22 2016 John Crisp <jcrisp@safeandsoundit.co.uk> 0-1.4-1.sme
+* Thu Apr 28 2016 John Crisp <jcrisp@safeandsoundit.co.uk> 0-1.4-1.sme
 - First import to smecontribs
 
-* Tue Oct 31 17:00:00 2006 Stephen Noble <support@dungog.net>
+* Tue Oct 31 2006 Stephen Noble <support@dungog.net>
 - warning added to setup remote MailServer before delegating to them
 - [1.2-2]
 
-* Sun Aug 20 18:00:00 2006 Stephen Noble <stephen@dungog.net>
+* Sun Aug 20 2006 Stephen Noble <stephen@dungog.net>
 - initial release
 - [1.2-1]
 
